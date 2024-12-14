@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useRef } from "react"
-import { Upload, ImageIcon, X, Wand2, Loader2, Sparkles, Menu } from 'lucide-react'
+import { Upload, X, Wand2, Loader2, Sparkles, Menu } from 'lucide-react'
 // import Image from "next/image"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -58,8 +58,8 @@ export function ProductForm() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [selectedAvatar, setSelectedAvatar] = useState<AvatarOption | null>(null)
   const [selectedImage, setSelectedImage] = useState<UploadedImage | null>(null)
-  const [avatarOptions, setAvatarOptions] = useState<AvatarOption[]>(AVATAR_OPTIONS)
-  const [hasSample, setHasSample] = useState(false)
+  const [avatarOptions] = useState<AvatarOption[]>(AVATAR_OPTIONS)
+  // const [hasSample, setHasSample] = useState(false)
 
   const productInfoRef = useRef<HTMLDivElement>(null)
   const photosVideosRef = useRef<HTMLDivElement>(null)
