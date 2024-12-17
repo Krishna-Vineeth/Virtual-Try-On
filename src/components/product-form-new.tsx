@@ -39,13 +39,34 @@ interface AvatarOption {
   id: string
   label: string
   image: string
+  section: 'upper' | 'lower'
 }
 
 const AVATAR_OPTIONS: AvatarOption[] = [
-  { id: "men", label: "Men", image: "https://images.pexels.com/photos/2379005/pexels-photo-2379005.jpeg?w=200&h=200&fit=crop" },
-  { id: "women", label: "Women", image: "https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?w=200&h=200&fit=crop" },
-  { id: "boy", label: "Boy", image: "https://images.pexels.com/photos/35537/child-children-girl-happy.jpg?w=200&h=200&fit=crop" },
-  { id: "girl", label: "Girl", image: "https://images.pexels.com/photos/36029/aroni-arsa-children-little.jpg?w=200&h=200&fit=crop" },
+  { 
+    id: "men-upper", 
+    label: "Men Upper", 
+    section: "upper",
+    image: "https://images.pexels.com/photos/2379005/pexels-photo-2379005.jpeg?w=200&h=200&fit=crop" 
+  },
+  { 
+    id: "men-lower", 
+    label: "Men Lower", 
+    section: "lower",
+    image: "https://images.pexels.com/photos/2379005/pexels-photo-2379005.jpeg?w=200&h=200&fit=crop" 
+  },
+  { 
+    id: "women-upper", 
+    label: "Women Upper", 
+    section: "upper",
+    image: "https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?w=200&h=200&fit=crop" 
+  },
+  { 
+    id: "women-lower", 
+    label: "Women Lower", 
+    section: "lower",
+    image: "https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?w=200&h=200&fit=crop" 
+  },
 ]
 
 export function ProductForm() {
@@ -235,6 +256,47 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
   // Add state for mobile menu
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
+  async function handleGenerateAndUpload() {
+    try {
+        // First API call to generate product code
+        const generateResponse = await fetch('http://10.20.3.76:5001/generate-product-code', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Credentials': 'true',
+                'Access-Control-Allow-Origin': '*'
+            }
+        });
+
+        const generateData = await generateResponse.json();
+        console.log('Generate Product Code Response:', generateData);
+
+        if (generateData.success && generateData.value) {
+            // Second API call to upload image using the generated value
+            const uploadResponse = await fetch('https://seller-qa2-gcp.gdn-app.com/backend/product-external/api/images/upload', {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Credentials': 'true',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({
+                    productCode: generateData.value
+                })
+            });
+
+            const uploadData = await uploadResponse.json();
+            console.log('Upload Image Response:', uploadData);
+        } else {
+            console.error('Failed to generate product code:', generateData.errorMessage);
+        }
+    } catch (error) {
+        console.error('Error in API calls:', error);
+    }
+  }
+
   return (
     <section className="w-full min-h-screen relative">
       {/* Animated Header Section */}
@@ -283,7 +345,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
             "fixed md:relative inset-0 z-40 md:z-0 bg-white/95 md:bg-transparent backdrop-blur-sm md:backdrop-blur-none",
             "transform transition-transform duration-200 ease-in-out md:transform-none",
             isMobileMenuOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
-            "md:w-[200px] md:sticky md:top-0 md:h-fit mt-2 ml-5"
+            "md:w-[190px] md:sticky md:top-0 md:h-fit mt-2 ml-5"
           )}>
             {/* Close button for mobile */}
             <button
@@ -633,7 +695,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
           <div className="w-full max-w-[1400px] mx-auto px-4 md:px-8 flex justify-end gap-3 h-14">
             <div className="flex items-center gap-3">
               <Button variant="outline" size="sm">Cancel</Button>
-              <Button size="sm" className="bg-black text-white hover:bg-black/90">Send</Button>
+              <Button size="sm" className="bg-black text-white hover:bg-black/90" onClick={handleGenerateAndUpload}>Send</Button>
             </div>
           </div>
         </div>
@@ -738,41 +800,90 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Select Avatar Model</DialogTitle>
+            <DialogTitle>Select Model</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 p-4">
-            {avatarOptions.map((avatar) => (
-              <div
-                key={avatar.id}
-                onClick={() => handleAvatarSelect(avatar)}
-                className={cn(
-                  "relative aspect-square rounded-lg border-2 overflow-hidden cursor-pointer",
-                  selectedAvatar?.id === avatar.id
-                    ? "border-primary"
-                    : "border-muted"
-                )}
-              >
-                <img
-                  src={customAvatarImages[avatar.id] || avatar.image}
-                  alt={avatar.label}
-                  className="object-cover w-full h-full"
-                />
-                <div className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/50 to-transparent p-2">
-                  <span className="text-white font-medium">
-                    {avatar.label}
-                  </span>
-                </div>
-                <label className="absolute top-2 right-2 p-1.5 bg-white/90 rounded-full cursor-pointer hover:bg-white transition-colors">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => handleModelImageUpload(e, avatar.id)}
-                  />
-                  <Upload className="h-4 w-4 text-gray-600" />
-                </label>
+          <div className="space-y-6 p-4">
+            {/* Upper Section */}
+            <div>
+              <h3 className="text-sm font-medium mb-3">Upper Body</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {avatarOptions
+                  .filter(avatar => avatar.section === 'upper')
+                  .map((avatar) => (
+                    <div
+                      key={avatar.id}
+                      onClick={() => handleAvatarSelect(avatar)}
+                      className={cn(
+                        "relative aspect-square rounded-lg border-2 overflow-hidden cursor-pointer",
+                        selectedAvatar?.id === avatar.id
+                          ? "border-primary"
+                          : "border-muted"
+                      )}
+                    >
+                      <img
+                        src={customAvatarImages[avatar.id] || avatar.image}
+                        alt={avatar.label}
+                        className="object-cover w-full h-full"
+                      />
+                      <div className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/50 to-transparent p-2">
+                        <span className="text-white font-medium">
+                          {avatar.label}
+                        </span>
+                      </div>
+                      <label className="absolute top-2 right-2 p-1.5 bg-white/90 rounded-full cursor-pointer hover:bg-white transition-colors">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => handleModelImageUpload(e, avatar.id)}
+                        />
+                        <Upload className="h-4 w-4 text-gray-600" />
+                      </label>
+                    </div>
+                  ))}
               </div>
-            ))}
+            </div>
+
+            {/* Lower Section */}
+            <div>
+              <h3 className="text-sm font-medium mb-3">Lower Body</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {avatarOptions
+                  .filter(avatar => avatar.section === 'lower')
+                  .map((avatar) => (
+                    <div
+                      key={avatar.id}
+                      onClick={() => handleAvatarSelect(avatar)}
+                      className={cn(
+                        "relative aspect-square rounded-lg border-2 overflow-hidden cursor-pointer",
+                        selectedAvatar?.id === avatar.id
+                          ? "border-primary"
+                          : "border-muted"
+                      )}
+                    >
+                      <img
+                        src={customAvatarImages[avatar.id] || avatar.image}
+                        alt={avatar.label}
+                        className="object-cover w-full h-full"
+                      />
+                      <div className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/50 to-transparent p-2">
+                        <span className="text-white font-medium">
+                          {avatar.label}
+                        </span>
+                      </div>
+                      <label className="absolute top-2 right-2 p-1.5 bg-white/90 rounded-full cursor-pointer hover:bg-white transition-colors">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => handleModelImageUpload(e, avatar.id)}
+                        />
+                        <Upload className="h-4 w-4 text-gray-600" />
+                      </label>
+                    </div>
+                  ))}
+              </div>
+            </div>
           </div>
           <div className="flex justify-end gap-2 px-4 pb-4">
             <Button 
