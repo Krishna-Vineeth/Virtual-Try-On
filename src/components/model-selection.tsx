@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 
 interface ModelSelectionProps {
   onTryOn: (modelFile: File, type: 'upper' | 'lower') => Promise<void>;

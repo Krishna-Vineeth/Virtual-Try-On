@@ -112,7 +112,7 @@ export function ProductForm() {
   const [productName, setProductName] = useState("")
   const [brand, setBrand] = useState("")
   const [videoUrl, setVideoUrl] = useState('')
-  const [isGeneratingUrl, setIsGeneratingUrl] = useState(false)
+  const [isGeneratingUrl] = useState(false)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [selectedAvatar, setSelectedAvatar] = useState<AvatarOption | null>(null)
   const [selectedImage, setSelectedImage] = useState<UploadedImage | null>(null)
@@ -1056,10 +1056,8 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
                                 src={image.url}
                                 alt="Uploaded"
                                 className="h-full w-full object-contain rounded-lg"
-                                // style={{
-                                //   maxHeight: '200px',
-                                //   minHeight: '100px',
-                                // }}
+                                onClick={() => image.url && handleImageClick(image.url)}
+                                style={{ cursor: 'pointer' }}
                               />
                               <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <Button
@@ -1111,6 +1109,8 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
                                   src={image.url}
                                   alt="Generated"
                                   className="h-full w-full object-contain rounded-lg"
+                                  onClick={() => image.url && handleImageClick(image.url)}
+                                  style={{ cursor: 'pointer' }}
                                 />
                                 <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                   <Button

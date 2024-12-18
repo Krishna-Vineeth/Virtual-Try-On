@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
-import { ZoomIn, ZoomOut, X } from "lucide-react"
+import { ZoomIn, ZoomOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 interface ImagePreviewModalProps {
