@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-
+import { VideoGenerationModal } from "./video-generation-modal"
 
 interface UploadedImage {
   id: string
@@ -230,26 +230,35 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
     console.log(`Modal open status: ${isModalOpen}`)
   }, [isModalOpen])
 
-  const handleGenerateVideoUrl = async () => {
-    setIsGeneratingUrl(true)
+  const [isVideoModalOpen, setIsVideoModalOpen] = useState(false)
+
+  const handleGenerateVideoUrl = () => {
+    setIsVideoModalOpen(true)
+  }
+
+  const handleVideoGeneration = async (selectedImages: string[], prompt: string) => {
     try {
-      // Replace with your actual API endpoint
-      const response = {
-        ok: true,
-        json: () => Promise.resolve({
-          url: "https://www.youtube.com/watch?v=INLdX0gxwkk" 
+      const response = await fetch('http://10.20.3.76:5001/generate-video', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          images: selectedImages,
+          prompt: prompt
         })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to generate video: ${response.status}`);
       }
+
+      const data = await response.json();
+      setVideoUrl(data.videoUrl); // Assuming the API returns a videoUrl field
       
-      const data = await response.json()
-      if (data.url) {
-        setVideoUrl(data.url)
-      }
     } catch (error) {
-      console.error('Error generating video URL:', error)
-      // Add error handling as needed
-    } finally {
-      setIsGeneratingUrl(false)
+      console.error('Error generating video:', error);
+      throw error;
     }
   }
 
@@ -258,42 +267,497 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
 
   async function handleGenerateAndUpload() {
     try {
-        // First API call to generate product code
-        const generateResponse = await fetch('http://10.20.3.76:5001/generate-product-code', {
-            method: 'POST',
-            credentials: 'include',
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Credentials': 'true',
-                'Access-Control-Allow-Origin': '*'
-            }
-        });
+      // First API call to generate product code
+      const generateResponse = await fetch('http://10.20.3.76:5001/generate-product-code', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
 
-        const generateData = await generateResponse.json();
-        console.log('Generate Product Code Response:', generateData);
+      if (!generateResponse.ok) {
+        throw new Error(`Failed to generate product code: ${generateResponse.status}`);
+      }
 
-        if (generateData.success && generateData.value) {
-            // Second API call to upload image using the generated value
-            const uploadResponse = await fetch('https://seller-qa2-gcp.gdn-app.com/backend/product-external/api/images/upload', {
-                method: 'POST',
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Credentials': 'true',
-                    'Access-Control-Allow-Origin': '*'
-                },
-                body: JSON.stringify({
-                    productCode: generateData.value
-                })
+      const generateData = await generateResponse.json();
+      console.log('Generate Product Code Response:', generateData);
+
+      if (generateData.success && generateData.value) {
+        // Combine uploaded and generated images
+        const allImages = [
+          ...uploadedImages.map(img => ({ url: img.url, type: 'uploaded' })),
+          ...generatedImages.filter(img => img.url).map(img => ({ url: img.url!, type: 'generated' }))
+        ];
+
+        // Upload each image
+        const uploadPromises = allImages.map(async (image, index) => {
+          try {
+            const response = await fetch(image.url);
+            const blob = await response.blob();
+            
+            const formData = new FormData();
+            const imageFileName = `${generateData.value}/image_${index + 1}`;
+            const fileExtension = blob.type.split('/')[1] || 'jpg';
+            const fullFileName = `${imageFileName}.${fileExtension}`;
+            
+            const file = new File([blob], fullFileName, { type: blob.type });
+            
+            formData.append('imageFileName', fullFileName);
+            formData.append('image', file);
+            formData.append('productCode', generateData.value);
+            formData.append('active', 'false');
+
+            const uploadResponse = await fetch('http://10.20.3.76:5001/upload-image', {
+              method: 'POST',
+              body: formData,
             });
 
+            if (!uploadResponse.ok) {
+              throw new Error(`Upload failed for image ${index + 1}: ${uploadResponse.status}`);
+            }
+
             const uploadData = await uploadResponse.json();
-            console.log('Upload Image Response:', uploadData);
-        } else {
-            console.error('Failed to generate product code:', generateData.errorMessage);
+            console.log(`Upload Response for ${image.type} image ${index + 1}:`, uploadData);
+            const locationPath = uploadData.path || `${generateData.value}/${uploadData.fileName || `image_${index + 1}.${fileExtension}`}`;
+            return { 
+              ...uploadData, 
+              locationPath,
+              sequence: index 
+            };
+          } catch (error) {
+            console.error(`Error uploading image ${index + 1}:`, error);
+            throw error;
+          }
+        });
+
+        const uploadResults = await Promise.all(uploadPromises);
+        console.log('All uploads completed:', uploadResults);
+
+        // Prepare payload for add-product API
+        const addProductPayload = {
+          activated: false,
+          brand: brand, // Using the brand state
+          businessPartnerCode: "DED-70077",
+          businessPartnerId: "617b77ca03d9bb660f8e4dca",
+          businessPartnerName: "DED-70077",
+          categoryName: "T-Shirt", // You might want to make this dynamic based on user selection
+          description: "Cgo8aGVhZD4KPC9oZWFkPgo8Ym9keT4KPHA+VHNoaXJ0PC9wPgo8L2JvZHk+Cg==",
+          longDescription: "Cgo8aGVhZD4KPC9oZWFkPgo8Ym9keT4KPHA+VHNoaXJ0PC9wPgo8L2JvZHk+Cg==",
+          name: productName, // Using the productName state
+          productCode: generateData.value,
+          specificationDetail:"-",
+          height:12,
+          length:12,
+          brandCode: "BR-M036969-07635",
+          productStory:null,
+          promoSKU:true,
+          shippingWeight:0.288,
+          uniqueSellingPoint:"",
+          uom:"PC",
+          url:"",
+          viewable:false,
+          weight:0.134,
+          width:12,
+          freeSample:false,
+          brandApprovalStatus:"APPROVED",
+          imagesUpdated:false,
+          gdnProductSku:null,
+          oldProductCode:null,
+          productBusinessPartnerAttributes:[],
+          preOrder: {
+            isPreOrder: false,
+            preOrderType: "",
+            preOrderValue: null,
+            preOrderDate: null
+          },
+          
+          // Channel settings
+          off2OnChannelActive: false,
+          online: true,
+          cncActivated: false,
+          fbb: false,
+          b2cActivated: null,
+          b2bActivated: false,
+          bundleProduct: false,
+          
+          // Logistics settings
+          productItemLogisticsWebRequests: [
+            {
+              logisticProductCode: "BES_TMS_SD",
+              logisticOptionCode: "SAME_DAY",
+              logisticOptionName: "SameDay",
+              requiredLongLat: false,
+              additionalInformation: null,
+              logisticProductName: "BES-SD",
+              highlightedInformation: null,
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: false
+            },
+            {
+              logisticProductCode: "GOSEND_INSTANT_CAR",
+              logisticOptionCode: "INSTANT_CAR",
+              logisticOptionName: "Instant Car",
+              requiredLongLat: true,
+              additionalInformation: null,
+              logisticProductName: "GOSEND Instant Car",
+              highlightedInformation: null,
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: false
+            },
+            {
+              logisticProductCode: "GOSEND_INSTANT_HD",
+              logisticOptionCode: "HOUR_DEL",
+              logisticOptionName: "2 jam sampai",
+              requiredLongLat: true,
+              additionalInformation: null,
+              logisticProductName: "2 Jam Sampai GS",
+              highlightedInformation: null,
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: false
+            },
+            {
+              logisticProductCode: "GOSEND_SAMEDAY",
+              logisticOptionCode: "SAME_DAY",
+              logisticOptionName: "SameDay",
+              requiredLongLat: true,
+              additionalInformation: "<p><br></p><ul><li>Semua produk regular yang memenuhi persyaratan berikut akan tersedia untuk pengiriman melalui GO-SEND sesuai dengan permintaan customer:</li></ul><p style=\"margin-left: 60px;\">- Lokasi pickup point di Jabodetabek dan Bandung</p><p style=\"margin-left: 60px;\">- Berat max 5 kg</p><p style=\"margin-left: 60px;\">- Dimensi 40 X 40 x 17 (cm)</p><ul><li>Pastikan semua produk anda tersedia untuk mengindari autocancel. Order yang tidak difulfill dalam 1 hari kerja akan dibatalkan secara otomatis oleh sistem</li><li>Pastikan nomor telepon & telpon kontak yang tercatat di pickup point<strong>&nbsp;tidak mengandung SPASI dan tidak lebih dari 14 digit&nbsp;</strong>(nomor telepon yang tidak sesuai dengan ketentuan akan menyebabkan gagal booking Gosend)</li></ul>",
+              logisticProductName: "GOSEND Sameday",
+              highlightedInformation: "<p>Batas autocancel<span>&nbsp;</span><strong>1 hari kerja</strong></p>",
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: true
+            },
+            {
+              logisticProductCode: "GRAB_EXPRESS_CAR",
+              logisticOptionCode: "INSTANT",
+              logisticOptionName: "Instant",
+              requiredLongLat: false,
+              additionalInformation: null,
+              logisticProductName: "Grab Instant Car",
+              highlightedInformation: null,
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: false
+            },
+            {
+              logisticProductCode: "GRAB_INSTANT",
+              logisticOptionCode: "INSTANT",
+              logisticOptionName: "Instant",
+              requiredLongLat: false,
+              additionalInformation: "<p>shippingstandardautomation</p>",
+              logisticProductName: "Grab Instant",
+              highlightedInformation: "shippingstandardautomation",
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: true
+            },
+            {
+              logisticProductCode: "JNE_COD",
+              logisticOptionCode: "STANDARD",
+              logisticOptionName: "STANDARD",
+              requiredLongLat: false,
+              additionalInformation: "<ul><li>Untuk mengaktifkan dan menonaktifkan pilihan COD, kami memerlukan waktu maksimal <strong><u>3 hari kerja</u>&nbsp;</strong>setelah merchant mengubah pengaturan pilihan COD di MTA.</li><li>Semua produk (dengan harga normal Rp10.000 &ndash; Rp3.000.000) yang memenuhi syarat COD akan diikutsertakan dan tersedia untuk pembayaran COD sesuai dengan permintaan customer.</li><li>Pilihan COD hanya berlaku untuk <strong>merchant dengan</strong>\n<strong>jenis pengiriman pick-up</strong> di wilayah <strong>Jakarta, Tangerang, Depok, Bandung, Surabaya, Sidoarjo, Denpasar, Kuta, dan Medan</strong>.</li><li>Jika produk gagal dikirim, maka produk akan dikembalikan ke merchant dalam jangka waktu <strong>2x jumlah hari estimasi pengiriman + 10 hari kerja</strong>. Contoh: jika produk gagal dikirimkan dari Jakarta ke Surabaya (estimasi 3 hari), maka produk akan dikembalikan ke Jakarta dalam waktu 2x3 hari + 10 hari kerja.</li><li>Jika produk gagal dikirim, merchant harus <strong>segera memeriksa kondisi produk saat sampai di alamat merchant</strong>. Pastikan Anda menyiapkan bukti pemeriksaan kondisi produk seperti foto/video/etc.</li><li>Jika merchant tidak melaporkan kerusakan/kekurangan langsung ke pihak logistik, maka merchant dianggap sudah menerima dan <strong>tidak dapat lagi mengajukan penolakan produk tersebut</strong>.</li><li>Kerusakan isi paket produk pecah belah/mudah pecah (fragile) tidak ditanggung oleh Blibli.com dan pihak logistik.</li><li>Pengiriman produk COD harus menggunakan <strong>Label Pengiriman dari Blibli.com</strong> yang disertakan informasi COD, harga produk, dan alamat pengembalian (untuk penanganan produk yang gagal terkirim). Kesalahan penanganan karena kekurangan informasi pada label pengiriman tidak ditanggung oleh Blibli.com dan pihak logistik.</li></ul>",
+              logisticProductName: "JNE COD",
+              highlightedInformation: null,
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: false
+            },
+            {
+              logisticProductCode: "JNTC_CARGO_TEN",
+              logisticOptionCode: "TRUCKING",
+              logisticOptionName: "Cargo",
+              requiredLongLat: false,
+              additionalInformation: null,
+              logisticProductName: "JNT Cargo",
+              highlightedInformation: null,
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: false
+            },
+            {
+              logisticProductCode: "PAXEL_MP",
+              logisticOptionCode: "EXPRESS",
+              logisticOptionName: "Express",
+              requiredLongLat: true,
+              additionalInformation: "<ul><li>Aktivasi berlaku 3 hari kerja sejak pengajuan</li><li>Pengiriman tersedia untuk <strong>Area Kota</strong><span>:</span><br>Bandung, Banyuwangi, Bekasi, Bogor, Cirebon, Denpasar, Depok, Jakarta, Jember, Kediri, Madiun, Magelang, Makasar, Malang, Medan, Purwokerto, Semarang, Solo, Surabaya, Tangerang, Tasikmalaya, Yogyakarta</li><li>Pastikan berat paket yang tertulis di MTA sama dengan berat paket yang akan diserahkan ke Paxel, dengan maksimum berat paket sebesar 5 KG per koli</li><li>Petunjuk pengemasan:<ul><li>Makanan beku: Pastikan makanan/minuman dibungkus dengan plastik vacuum dan dilapisi kembali dengan box/styrofoam</li><li>Makanan segar: Pastikan makanan/minuman dibungkus dengan box</li></ul></li></ul>",
+              logisticProductName: "PAXEL MP",
+              highlightedInformation: "<p>Pilihan pengiriman kategori makanan & minuman yang dilengkapi fasilitas pendingin</p>",
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: false
+            },
+            {
+              logisticProductCode: "WAHANA_EKO",
+              logisticOptionCode: "ECONOMY",
+              logisticOptionName: "Economy",
+              requiredLongLat: false,
+              additionalInformation: null,
+              logisticProductName: "Wahana Ekonomis",
+              highlightedInformation: null,
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: false
+            },
+            {
+              logisticProductCode: "WAHANA_EKO_B",
+              logisticOptionCode: "TRUCKING",
+              logisticOptionName: "Cargo",
+              requiredLongLat: false,
+              additionalInformation: null,
+              logisticProductName: "Wahana",
+              highlightedInformation: null,
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: false
+            },
+            {
+              logisticProductCode: "WAHANA_TRUCKING",
+              logisticOptionCode: "TRUCKING",
+              logisticOptionName: "Cargo",
+              requiredLongLat: false,
+              additionalInformation: null,
+              logisticProductName: "Wahana Trucking",
+              highlightedInformation: null,
+              downloadInformation: null,
+              downloadable: false,
+              historyAvailable: false,
+              selected: false
+            }
+          ],
+          
+          // Size chart settings
+          sizeChartCode: null,
+          sizeChartName: null,
+          productCategories: [
+            {
+              level: 3,
+              categoryName: "T-Shirt",
+              categoryNameEnglish: "T-Shirt",
+              categoryCode: "T--1000004",
+              catalog: {
+                id: "41591a5a-daad-11e4-b9d6-1681e6b88ec1",
+                name: "MASTER CATALOG",
+                catalogCode: "10001",
+                catalogType: "MASTER_CATALOG"
+              },
+              id: "6c23cfb8-c0be-697d-c5ec-8e4bbf42314a"
+            }
+          ],
+          productAttributes: [
+            {
+              attribute: {
+                searchAble: false,
+                skuValue: false,
+                productAttributeName: "Material",
+                attributeCode: "MA-0000006",
+                attributeType: "DESCRIPTIVE_ATTRIBUTE",
+                basicView: true,
+                description: "TWF0ZXJpYWw=",
+                example: null,
+                id: "28f69725-9fd3-46af-a36d-f037dbe02243",
+                mandatory: false,
+                variantCreation: false,
+                name: "Material",
+                nameEnglish: "Material",
+                predefinedAllowedAttributeValues: null
+              },
+              id: null,
+              ownByProductItem: false,
+              productAttributeName: "Material",
+              productAttributeValues: [
+                {
+                  name: "Material",
+                  nameEnglish: "Material",
+                  allowedAttributeValue: null,
+                  descriptiveAttributeValueType: "SINGLE",
+                  id: null,
+                  predefinedAllowedAttributeValue: null,
+                  value: "",
+                  descriptiveAttributeValue: ""
+                }
+              ],
+              sequence: 0
+            },
+            {
+              attribute: {
+                searchAble: false,
+                skuValue: false,
+                productAttributeName: "Care Label",
+                attributeCode: "CA-0036941",
+                attributeType: "DESCRIPTIVE_ATTRIBUTE",
+                basicView: true,
+                description: "Q2FyZSBMYWJlbA==",
+                example: null,
+                id: "7ded34c8-ffee-45bd-96a3-e479242b1e2f",
+                mandatory: false,
+                variantCreation: false,
+                name: "Care Label",
+                nameEnglish: "Care Label",
+                predefinedAllowedAttributeValues: null
+              },
+              id: null,
+              ownByProductItem: false,
+              productAttributeName: "Care Label",
+              productAttributeValues: [
+                {
+                  name: "Care Label",
+                  nameEnglish: "Care Label",
+                  allowedAttributeValue: null,
+                  descriptiveAttributeValueType: "SINGLE",
+                  id: null,
+                  predefinedAllowedAttributeValue: null,
+                  value: "",
+                  descriptiveAttributeValue: ""
+                }
+              ],
+              sequence: 0
+            },
+            {
+              attribute: {
+                searchAble: true,
+                skuValue: false,
+                productAttributeName: "Brand",
+                attributeCode: "BR-M036969",
+                attributeType: "PREDEFINED_ATTRIBUTE",
+                basicView: true,
+                description: "QnJhbmQgKFByZWRlZmluZWQp",
+                example: null,
+                id: "176cff65-5e57-4458-920d-2d120d471d22",
+                mandatory: false,
+                variantCreation: false,
+                name: "Brand",
+                nameEnglish: "Brand",
+                predefinedAllowedAttributeValues: null
+              },
+              id: null,
+              ownByProductItem: false,
+              productAttributeName: "Brand",
+              productAttributeValues: [
+                {
+                  allowedAttributeValue: null,
+                  descriptiveAttributeValue: null,
+                  descriptiveAttributeValueType: "PREDEFINED",
+                  id: null,
+                  predefinedAllowedAttributeValue: {
+                    id: null,
+                    predefinedAllowedAttributeCode: "BR-M036969-07635",
+                    value: brand, // Using the brand state value
+                    sequence: null
+                  }
+                }
+              ]
+            }
+          ],
+          productItemRequests: [
+            {
+              generatedItemName: productName,
+              id:null,
+              attributesMap:{
+              },
+              gdnProductItemSku:"",
+              markDefaultAddress:true,
+              sourceItemCode:null,
+              contentChanged:false,
+              upcCode:"",
+              merchantSku:"",
+              pickupPointId:"",
+              productItemHashCode:"",
+              productItemId:"",
+              productType:1,
+              dangerousGoodsLevel:0,
+              showWholesaleDiscountError:{
+                show:false,
+                closed:false
+              },
+
+              pickupPoints: [
+                {
+                  id:null,
+                  pickupPointId:"PP-3279208",
+                  minimumStock:0,
+                  display:false,
+                  buyable:false,
+                  cncDisplay:false,
+                  cncBuyable:false,
+                  discount:0,
+                  price:10,
+                  salePrice:10,
+                  wholesalePriceActivated:false,
+                  fbbActivated:false,
+                  stock:0,
+                  pickupPointName:"PP-3279208",
+                  cncActivated:false,
+                  delivery:true,
+                  pickupPointUpdated:true,
+                  b2bFields:null
+                }
+              ],
+              images: uploadResults.map((result, index) => ({
+                name: `${productName}.jpg`,
+                width: 800,
+                height: 800,
+                sequence: index,
+                markForDelete:false,
+                type: "new",
+                generatedItemName:false,
+                mainImages: index === 0,
+                originalImage: true,
+                commonImage: true,
+                locationPath: result.locationPath
+              }))
+            }
+          ],
+          commonImages: uploadResults.map((result, index) => ({
+            name: `${productName}.jpg`,
+            width: 800,
+            height: 800,
+            sequence: index,
+            type: "new",
+            mainImages: index === 0,
+            originalImage: true,
+            commonImage: true,
+            locationPath: result.locationPath
+          }))
+          // ... rest of the payload structure remains the same as your example
+        };
+
+        // Make the final API call to add-product
+        const addProductResponse = await fetch('http://10.20.3.76:5001/add_product', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(addProductPayload)
+        });
+
+        if (!addProductResponse.ok) {
+          throw new Error(`Failed to add product: ${addProductResponse.status}`);
         }
+
+        const addProductData = await addProductResponse.json();
+        console.log('Add Product Response:', addProductData);
+
+      } else {
+        throw new Error('Failed to generate product code: Invalid response format');
+      }
     } catch (error) {
-        console.error('Error in API calls:', error);
+      console.error('Error in API calls:', error);
+      // You might want to show an error message to the user here
     }
   }
 
@@ -424,8 +888,8 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="c1">Category 1</SelectItem>
-                      <SelectItem value="c2">Category 2</SelectItem>
+                      <SelectItem value="c1">T-Shirts</SelectItem>
+                      {/* <SelectItem value="c2">T-Shirts</SelectItem> */}
                     </SelectContent>
                   </Select>
                 </div>
@@ -902,6 +1366,14 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
           </div>
         </DialogContent>
       </Dialog>
+
+      <VideoGenerationModal
+        isOpen={isVideoModalOpen}
+        onClose={() => setIsVideoModalOpen(false)}
+        uploadedImages={uploadedImages}
+        generatedImages={generatedImages}
+        onGenerate={handleVideoGeneration}
+      />
 
     </section>
   )
