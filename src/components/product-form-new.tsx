@@ -345,109 +345,120 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
 
   async function handleGenerateAndUpload() {
     try {
+      // First API call to generate product code
       const generateResponse = await fetch('http://127.0.0.1:5001/generate-product-code', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         }
       });
-
+  
       if (!generateResponse.ok) {
         throw new Error(`Failed to generate product code: ${generateResponse.status}`);
       }
-
+  
       const generateData = await generateResponse.json();
       console.log('Generate Product Code Response:', generateData);
-
+  
       if (generateData.success && generateData.value) {
-        // First handle uploaded images
-        const uploadedImagesResults = [];
-        for (const image of uploadedImages) {
+        // Handle uploaded images
+        const uploadPromises = uploadedImages.map(async (image, index) => {
           try {
-            console.log(`Processing uploaded image: ${image.id}`);
             const blob = await convertToJpegBlob(image.url);
-            const imageFileName = `${generateData.value}/image_${uploadedImagesResults.length + 1}`;
-            const fullFileName = `${imageFileName}.jpg`;
-            
+            const imageFileName = `${generateData.value}/image_${index + 1}`;
+            const fileExtension = 'jpg';
+            const fullFileName = `${imageFileName}.${fileExtension}`;
+  
             const file = new File([blob], fullFileName, { type: 'image/jpeg' });
+  
             const formData = new FormData();
             formData.append('imageFileName', fullFileName);
             formData.append('image', file);
             formData.append('productCode', generateData.value);
             formData.append('active', 'false');
-
+  
             const uploadResponse = await fetch('http://127.0.0.1:5001/upload-image', {
               method: 'POST',
               body: formData,
             });
-
+  
             if (!uploadResponse.ok) {
-              throw new Error(`Upload failed for image ${image.id}: ${uploadResponse.status}`);
+              throw new Error(`Upload failed for image ${index + 1}: ${uploadResponse.status}`);
             }
-
+  
             const uploadData = await uploadResponse.json();
-            uploadedImagesResults.push({
+            return {
               ...uploadData,
-              locationPath: uploadData.path || `${generateData.value}/${uploadData.fileName || fullFileName}`,
-              sequence: uploadedImagesResults.length,
-              type: 'uploaded',
-              originalId: image.id
-            });
+              locationPath: uploadData.path || `${generateData.value}/${uploadData.fileName || `image_${index + 1}.${fileExtension}`}`,
+              sequence: index
+            };
           } catch (error) {
-            console.error(`Error uploading image ${image.id}:`, error);
+            console.error(`Error uploading image ${index + 1}:`, error);
+            throw error;
           }
-        }
-
-        // Then handle generated images
-        const generatedImagesResults = [];
-        for (const image of generatedImages.filter(img => img.url && !img.isGenerating)) {
-          try {
-            console.log(`Processing generated image: ${image.id}`);
-            // For generated images, first fetch the image data
-            const imageResponse = await fetch(image.url!);
-            const imageBlob = await imageResponse.blob();
-            
-            const imageFileName = `${generateData.value}/generated_${generatedImagesResults.length + 1}`;
-            const fullFileName = `${imageFileName}.jpg`;
-            
-            const file = new File([imageBlob], fullFileName, { type: 'image/jpeg' });
-            const formData = new FormData();
-            formData.append('imageFileName', fullFileName);
-            formData.append('image', file);
-            formData.append('productCode', generateData.value);
-            formData.append('active', 'false');
-
-            const uploadResponse = await fetch('http://127.0.0.1:5001/upload-image', {
-              method: 'POST',
-              body: formData,
-            });
-
-            if (!uploadResponse.ok) {
-              throw new Error(`Upload failed for generated image ${image.id}: ${uploadResponse.status}`);
+        });
+  
+        // Handle generated images
+        const generatedImagesPromises = generatedImages
+          .filter(img => img.url && !img.isGenerating)
+          .map(async (image, index) => {
+            try {
+              const proxyResponse = await fetch('http://127.0.0.1:5001/proxy-image', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ imageUrl: image.url })
+              });
+  
+              if (!proxyResponse.ok) {
+                throw new Error(`Failed to fetch image through proxy: ${proxyResponse.status}`);
+              }
+  
+              const imageBlob = await proxyResponse.blob();
+              const imageFileName = `${generateData.value}/generated_${index + 1}`;
+              const fullFileName = `${imageFileName}.jpg`;
+              
+              const file = new File([imageBlob], fullFileName, { type: 'image/jpeg' });
+  
+              const formData = new FormData();
+              formData.append('imageFileName', fullFileName);
+              formData.append('image', file);
+              formData.append('productCode', generateData.value);
+              formData.append('active', 'false');
+  
+              const uploadResponse = await fetch('http://127.0.0.1:5001/upload-image', {
+                method: 'POST',
+                body: formData,
+              });
+  
+              if (!uploadResponse.ok) {
+                throw new Error(`Upload failed for generated image ${index + 1}: ${uploadResponse.status}`);
+              }
+  
+              const uploadData = await uploadResponse.json();
+              return {
+                ...uploadData,
+                locationPath: uploadData.path || `${generateData.value}/${uploadData.fileName || `generated_${index + 1}.jpg`}`,
+                sequence: uploadedImages.length + index
+              };
+            } catch (error) {
+              console.error(`Error uploading generated image ${index + 1}:`, error);
+              throw error;
             }
-
-            const uploadData = await uploadResponse.json();
-            generatedImagesResults.push({
-              ...uploadData,
-              locationPath: uploadData.path || `${generateData.value}/${uploadData.fileName || fullFileName}`,
-              sequence: uploadedImagesResults.length + generatedImagesResults.length,
-              type: 'generated',
-              originalId: image.id
-            });
-          } catch (error) {
-            console.error(`Error uploading generated image ${image.id}:`, error);
-          }
-        }
-
+          });
+  
+        // Wait for all uploads to complete
+        const [uploadResults, generatedImagesResults] = await Promise.all([
+          Promise.all(uploadPromises),
+          Promise.all(generatedImagesPromises)
+        ]);
+  
         // Combine all results
-        const allUploadResults = [...uploadedImagesResults, ...generatedImagesResults];
-        console.log('Total uploads completed:', allUploadResults.length);
-
-        if (allUploadResults.length === 0) {
-          throw new Error('No images were successfully uploaded');
-        }
-
-        // Prepare the add-product payload with all uploaded images
+        const allImageResults = [...uploadResults, ...generatedImagesResults];
+        console.log('All uploads completed:', allImageResults);
+  
+        // Prepare payload for add-product API
         const addProductPayload = {
           activated: false,
           brand: brand, // Using the brand state
@@ -484,7 +495,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
             preOrderValue: null,
             preOrderDate: null
           },
-          
+
           // Channel settings
           off2OnChannelActive: false,
           online: true,
@@ -493,7 +504,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
           b2cActivated: null,
           b2bActivated: false,
           bundleProduct: false,
-          
+
           // Logistics settings
           productItemLogisticsWebRequests: [
             {
@@ -653,7 +664,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
               selected: false
             }
           ],
-          
+
           // Size chart settings
           sizeChartCode: null,
           sizeChartName: null,
@@ -809,11 +820,11 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
                   cncDisplay:false,
                   cncBuyable:false,
                   discount:0,
-                  price:100000,
-                  salePrice:100000,
+                  price:10,
+                  salePrice:10,
                   wholesalePriceActivated:false,
                   fbbActivated:false,
-                  stock:1,
+                  stock:0,
                   pickupPointName:"PP-3279208",
                   cncActivated:false,
                   delivery:true,
@@ -821,14 +832,14 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
                   b2bFields:null
                 }
               ],
-              images: uploadResults.map((result, index) => ({
+              images: allImageResults.map((result, index) => ({
                 name: `${productName}.jpg`,
                 width: 800,
                 height: 800,
                 sequence: index,
-                markForDelete:false,
+                markForDelete: false,
                 type: "new",
-                generatedItemName:false,
+                generatedItemName: false,
                 mainImages: index === 0,
                 originalImage: true,
                 commonImage: true,
@@ -836,7 +847,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
               }))
             }
           ],
-          commonImages: uploadResults.map((result, index) => ({
+          commonImages: allImageResults.map((result, index) => ({
             name: `${productName}.jpg`,
             width: 800,
             height: 800,
@@ -847,10 +858,9 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
             commonImage: true,
             locationPath: result.locationPath
           }))
-          // ... rest of the payload structure remains the same as your example
         };
 
-        // Continue with add-product API call...
+        // Make the final API call to add-product
         const addProductResponse = await fetch('http://127.0.0.1:5001/add_product', {
           method: 'POST',
           headers: {
@@ -862,7 +872,6 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
         if (!addProductResponse.ok) {
           throw new Error(`Failed to add product: ${addProductResponse.status}`);
         }
-
         const addProductData = await addProductResponse.json();
         console.log('Add Product Response:', addProductData);
 
@@ -871,6 +880,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
       }
     } catch (error) {
       console.error('Error in API calls:', error);
+      // You might want to show an error message to the user here
     }
   }
 
@@ -1495,7 +1505,9 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
         isOpen={isVideoModalOpen}
         onClose={() => setIsVideoModalOpen(false)}
         uploadedImages={uploadedImages}
-        generatedImages={generatedImages}
+        generatedImages={generatedImages.filter((img): img is GeneratedImage & { url: string } => 
+          Boolean(img.url) && !img.isGenerating
+        )}
         onGenerate={handleVideoGeneration}
       />
 
