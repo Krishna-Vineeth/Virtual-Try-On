@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { VideoGenerationModal } from "./video-generation-modal"
+import { ImagePreviewModal } from "./image-preview-modal"
 
 interface UploadedImage {
   id: string
@@ -157,48 +158,88 @@ export function ProductForm() {
   }
 
 const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
-    // alert("handle generate image.")
-    e.preventDefault(); // Prevent form submission
-    if (!selectedAvatar || !selectedImage) return
+    e.preventDefault();
+    if (!selectedAvatar || !selectedImage) return;
 
-    setIsModalOpen(false)
+    setIsModalOpen(false);
     
     const newGeneratedImage: GeneratedImage = {
       id: Math.random().toString(36).substring(7),
       originalId: selectedImage.id,
       isGenerating: true,
+    };
+
+    setGeneratedImages((prev) => [...prev, newGeneratedImage]);
+
+    try {
+      // Convert the selected product image URL to a File
+      const productResponse = await fetch(selectedImage.url);
+      const productBlob = await productResponse.blob();
+      const productFile = new File([productBlob], 'product-image.jpg', { type: 'image/jpeg' });
+
+      // Prepare FormData
+      const formData = new FormData();
+      
+      // Check if there's a custom uploaded image for this avatar
+      const customModelImage = customAvatarImages[selectedAvatar.id];
+      
+      if (customModelImage) {
+        // Use the custom uploaded model image
+        const modelResponse = await fetch(customModelImage);
+        const modelBlob = await modelResponse.blob();
+        const modelFile = new File([modelBlob], 'model-image.jpg', { type: 'image/jpeg' });
+        formData.append('model_input', modelFile);
+      } else {
+        // Use the default model image
+        const modelResponse = await fetch(selectedAvatar.image);
+        const modelBlob = await modelResponse.blob();
+        const modelFile = new File([modelBlob], 'model-image.jpg', { type: 'image/jpeg' });
+        formData.append('model_input', modelFile);
+      }
+      
+      // Add product image based on section
+      if (selectedAvatar.section === 'upper') {
+        formData.append('upper_input', productFile);
+      } else {
+        formData.append('lower_input', productFile);
+      }
+
+      // Call the try-on API
+      const response = await fetch('http://10.20.3.76:5001/try-on-with-image', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Try-on request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Update the generated image with the response URL
+      setGeneratedImages((prev) =>
+        prev.map((img) =>
+          img.id === newGeneratedImage.id
+            ? {
+                ...img,
+                isGenerating: false,
+                url: data,
+              }
+            : img
+        )
+      );
+
+    } catch (error) {
+      console.error('Error in try-on process:', error);
+      setGeneratedImages((prev) =>
+        prev.filter((img) => img.id !== newGeneratedImage.id)
+      );
+      // You might want to show an error message to the user here
     }
 
-    setGeneratedImages((prev) => [...prev, newGeneratedImage])
-
-    // Simulate API call with timeout
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-                          // replace api
-    let res = await fetch("https://gfgkarecode.pythonanywhere.com/pe_count", {
-      method: "GET",    // will be post for actual api
-      // body: JSON.stringify({       // body should be kept for actual api
-      //   avatarId: selectedAvatar.id,
-      //   imageUrl: selectedImage.url,
-      // }),
-    });
-    const imageGenerationData = await res.json();
-
-    setGeneratedImages((prev) =>
-      prev.map((img) =>
-        img.id === newGeneratedImage.id
-          ? {
-              ...img,
-              isGenerating: false,
-              url: imageGenerationData?.url || "https://images.pexels.com/photos/35537/child-children-girl-happy.jpg?w=200&h=200&fit=crop",
-                        // actual image             fallback image.
-            }
-          : img
-      )
-    )
-
-    setSelectedImage(null)
-    setSelectedAvatar(null)
-  }
+    setSelectedImage(null);
+    setSelectedAvatar(null);
+};
 
   const [activeSection, setActiveSection] = useState<string>("product-info")
 
@@ -690,16 +731,16 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
                   id:null,
                   pickupPointId:"PP-3279208",
                   minimumStock:0,
-                  display:false,
-                  buyable:false,
+                  display:true,
+                  buyable:true,
                   cncDisplay:false,
                   cncBuyable:false,
                   discount:0,
-                  price:10,
-                  salePrice:10,
+                  price:100000,
+                  salePrice:100000,
                   wholesalePriceActivated:false,
                   fbbActivated:false,
-                  stock:0,
+                  stock:1,
                   pickupPointName:"PP-3279208",
                   cncActivated:false,
                   delivery:true,
@@ -759,6 +800,14 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
       console.error('Error in API calls:', error);
       // You might want to show an error message to the user here
     }
+  }
+
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false)
+
+  const handleImageClick = (imageUrl: string) => {
+    setPreviewImage(imageUrl)
+    setIsPreviewOpen(true)
   }
 
   return (
@@ -965,38 +1014,28 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
                       <Label className="mb-4 block">Generated photos</Label>
                       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-4">
                         {generatedImages.map((image) => (
-                          <div key={image.id} className="aspect-square border rounded-lg overflow-hidden">
-                            {image.isGenerating ? (
-                              <div className="h-full w-full flex items-center justify-center bg-gray-50">
-                                <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-                              </div>
-                            ) : (
-                              <div className="relative h-full w-full">
-                                <img
-                                  src={image.url}
-                                  alt="Generated"
-                                  className="h-full w-full object-cover"
-                                  // style={{
-                                  //   maxHeight: '200px',
-                                  //   minHeight: '100px',
-                                  // }}
-                                />
-                                <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity">
-                                  <div className="absolute top-2 right-2">
-                                    <Button
-                                      variant="secondary"
-                                      size="icon"
-                                      className="h-8 w-8 bg-white/90 hover:bg-white"
-                                      onClick={() => {
-                                        setGeneratedImages(prev => 
-                                          prev.filter(img => img.id !== image.id)
-                                        )
-                                      }}
-                                    >
-                                      <X className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                </div>
+                          <div 
+                            key={image.id} 
+                            className="relative cursor-pointer"
+                            onClick={() => handleImageClick(image.url)}
+                          >
+                            <img
+                              src={image.url}
+                              alt="Generated"
+                              className="w-full aspect-square object-cover rounded-lg hover:opacity-90 transition-opacity"
+                            />
+                            <div className="absolute top-2 right-2 flex gap-2 opacity-0 hover:opacity-100 transition-opacity">
+                                <Button
+                                  variant="secondary"
+                                  size="icon"
+                                  onClick={() => handleRemoveUpload(image.id)}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                            </div>
+                            {image.isGenerating && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
+                                <Loader2 className="w-6 h-6 animate-spin text-white" />
                               </div>
                             )}
                           </div>
@@ -1374,6 +1413,17 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
         generatedImages={generatedImages}
         onGenerate={handleVideoGeneration}
       />
+
+      {previewImage && (
+        <ImagePreviewModal
+          isOpen={isPreviewOpen}
+          onClose={() => {
+            setIsPreviewOpen(false)
+            setPreviewImage(null)
+          }}
+          imageUrl={previewImage}
+        />
+      )}
 
     </section>
   )
