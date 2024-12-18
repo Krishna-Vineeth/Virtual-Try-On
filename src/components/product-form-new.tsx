@@ -70,6 +70,42 @@ const AVATAR_OPTIONS: AvatarOption[] = [
   },
 ]
 
+// Add this utility function near the top of your file
+const convertToJpegBlob = async (imageUrl: string): Promise<Blob> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";  // Handle CORS
+    
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Failed to get canvas context'));
+        return;
+      }
+      
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Failed to convert image to blob'));
+          }
+        },
+        'image/jpeg',
+        0.95  // Quality
+      );
+    };
+    
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = imageUrl;
+  });
+};
+
 export function ProductForm() {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([])
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([])
@@ -205,7 +241,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
       }
 
       // Call the try-on API
-      const response = await fetch('http://10.20.3.76:5001/try-on-with-image', {
+      const response = await fetch('http://127.0.0.1:5001/try-on-with-image', {
         method: 'POST',
         body: formData,
       });
@@ -215,6 +251,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
       }
 
       const data = await response.json();
+      // const data = "https://res.cloudinary.com/daxepgo72/image/upload/v1734444592/skxj8habqu3u83eknnqc.jpg"
 
       // Update the generated image with the response URL
       setGeneratedImages((prev) =>
@@ -279,7 +316,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
 
   const handleVideoGeneration = async (selectedImages: string[], prompt: string) => {
     try {
-      const response = await fetch('http://10.20.3.76:5001/generate-video', {
+      const response = await fetch('http://127.0.0.1:5001/generate-video', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -308,8 +345,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
 
   async function handleGenerateAndUpload() {
     try {
-      // First API call to generate product code
-      const generateResponse = await fetch('http://10.20.3.76:5001/generate-product-code', {
+      const generateResponse = await fetch('http://127.0.0.1:5001/generate-product-code', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -324,57 +360,94 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
       console.log('Generate Product Code Response:', generateData);
 
       if (generateData.success && generateData.value) {
-        // Combine uploaded and generated images
-        const allImages = [
-          ...uploadedImages.map(img => ({ url: img.url, type: 'uploaded' })),
-          ...generatedImages.filter(img => img.url).map(img => ({ url: img.url!, type: 'generated' }))
-        ];
-
-        // Upload each image
-        const uploadPromises = allImages.map(async (image, index) => {
+        // First handle uploaded images
+        const uploadedImagesResults = [];
+        for (const image of uploadedImages) {
           try {
-            const response = await fetch(image.url);
-            const blob = await response.blob();
+            console.log(`Processing uploaded image: ${image.id}`);
+            const blob = await convertToJpegBlob(image.url);
+            const imageFileName = `${generateData.value}/image_${uploadedImagesResults.length + 1}`;
+            const fullFileName = `${imageFileName}.jpg`;
             
+            const file = new File([blob], fullFileName, { type: 'image/jpeg' });
             const formData = new FormData();
-            const imageFileName = `${generateData.value}/image_${index + 1}`;
-            const fileExtension = blob.type.split('/')[1] || 'jpg';
-            const fullFileName = `${imageFileName}.${fileExtension}`;
-            
-            const file = new File([blob], fullFileName, { type: blob.type });
-            
             formData.append('imageFileName', fullFileName);
             formData.append('image', file);
             formData.append('productCode', generateData.value);
             formData.append('active', 'false');
 
-            const uploadResponse = await fetch('http://10.20.3.76:5001/upload-image', {
+            const uploadResponse = await fetch('http://127.0.0.1:5001/upload-image', {
               method: 'POST',
               body: formData,
             });
 
             if (!uploadResponse.ok) {
-              throw new Error(`Upload failed for image ${index + 1}: ${uploadResponse.status}`);
+              throw new Error(`Upload failed for image ${image.id}: ${uploadResponse.status}`);
             }
 
             const uploadData = await uploadResponse.json();
-            console.log(`Upload Response for ${image.type} image ${index + 1}:`, uploadData);
-            const locationPath = uploadData.path || `${generateData.value}/${uploadData.fileName || `image_${index + 1}.${fileExtension}`}`;
-            return { 
-              ...uploadData, 
-              locationPath,
-              sequence: index 
-            };
+            uploadedImagesResults.push({
+              ...uploadData,
+              locationPath: uploadData.path || `${generateData.value}/${uploadData.fileName || fullFileName}`,
+              sequence: uploadedImagesResults.length,
+              type: 'uploaded',
+              originalId: image.id
+            });
           } catch (error) {
-            console.error(`Error uploading image ${index + 1}:`, error);
-            throw error;
+            console.error(`Error uploading image ${image.id}:`, error);
           }
-        });
+        }
 
-        const uploadResults = await Promise.all(uploadPromises);
-        console.log('All uploads completed:', uploadResults);
+        // Then handle generated images
+        const generatedImagesResults = [];
+        for (const image of generatedImages.filter(img => img.url && !img.isGenerating)) {
+          try {
+            console.log(`Processing generated image: ${image.id}`);
+            // For generated images, first fetch the image data
+            const imageResponse = await fetch(image.url!);
+            const imageBlob = await imageResponse.blob();
+            
+            const imageFileName = `${generateData.value}/generated_${generatedImagesResults.length + 1}`;
+            const fullFileName = `${imageFileName}.jpg`;
+            
+            const file = new File([imageBlob], fullFileName, { type: 'image/jpeg' });
+            const formData = new FormData();
+            formData.append('imageFileName', fullFileName);
+            formData.append('image', file);
+            formData.append('productCode', generateData.value);
+            formData.append('active', 'false');
 
-        // Prepare payload for add-product API
+            const uploadResponse = await fetch('http://127.0.0.1:5001/upload-image', {
+              method: 'POST',
+              body: formData,
+            });
+
+            if (!uploadResponse.ok) {
+              throw new Error(`Upload failed for generated image ${image.id}: ${uploadResponse.status}`);
+            }
+
+            const uploadData = await uploadResponse.json();
+            generatedImagesResults.push({
+              ...uploadData,
+              locationPath: uploadData.path || `${generateData.value}/${uploadData.fileName || fullFileName}`,
+              sequence: uploadedImagesResults.length + generatedImagesResults.length,
+              type: 'generated',
+              originalId: image.id
+            });
+          } catch (error) {
+            console.error(`Error uploading generated image ${image.id}:`, error);
+          }
+        }
+
+        // Combine all results
+        const allUploadResults = [...uploadedImagesResults, ...generatedImagesResults];
+        console.log('Total uploads completed:', allUploadResults.length);
+
+        if (allUploadResults.length === 0) {
+          throw new Error('No images were successfully uploaded');
+        }
+
+        // Prepare the add-product payload with all uploaded images
         const addProductPayload = {
           activated: false,
           brand: brand, // Using the brand state
@@ -731,8 +804,8 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
                   id:null,
                   pickupPointId:"PP-3279208",
                   minimumStock:0,
-                  display:true,
-                  buyable:true,
+                  display:false,
+                  buyable:false,
                   cncDisplay:false,
                   cncBuyable:false,
                   discount:0,
@@ -777,8 +850,8 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
           // ... rest of the payload structure remains the same as your example
         };
 
-        // Make the final API call to add-product
-        const addProductResponse = await fetch('http://10.20.3.76:5001/add_product', {
+        // Continue with add-product API call...
+        const addProductResponse = await fetch('http://127.0.0.1:5001/add_product', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -798,7 +871,6 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
       }
     } catch (error) {
       console.error('Error in API calls:', error);
-      // You might want to show an error message to the user here
     }
   }
 
@@ -809,6 +881,11 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
     setPreviewImage(imageUrl)
     setIsPreviewOpen(true)
   }
+
+  // Add this function to handle removing generated images
+  const handleRemoveGenerated = (id: string) => {
+    setGeneratedImages(prev => prev.filter(img => img.id !== id));
+  };
 
   return (
     <section className="w-full min-h-screen relative">
@@ -1016,26 +1093,34 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
                         {generatedImages.map((image) => (
                           <div 
                             key={image.id} 
-                            className="relative cursor-pointer"
-                            onClick={() => handleImageClick(image.url)}
+                            className="aspect-square border border-dashed rounded-lg"
                           >
-                            <img
-                              src={image.url}
-                              alt="Generated"
-                              className="w-full aspect-square object-cover rounded-lg hover:opacity-90 transition-opacity"
-                            />
-                            <div className="absolute top-2 right-2 flex gap-2 opacity-0 hover:opacity-100 transition-opacity">
-                                <Button
-                                  variant="secondary"
-                                  size="icon"
-                                  onClick={() => handleRemoveUpload(image.id)}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                            </div>
-                            {image.isGenerating && (
-                              <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
-                                <Loader2 className="w-6 h-6 animate-spin text-white" />
+                            {image.url ? (
+                              <div className="relative h-full group">
+                                <img
+                                  src={image.url}
+                                  alt="Generated"
+                                  className="h-full w-full object-contain rounded-lg"
+                                />
+                                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Button
+                                    variant="secondary"
+                                    size="icon"
+                                    onClick={() => handleRemoveGenerated(image.id)}
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                                {image.isGenerating && (
+                                  <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
+                                    <Loader2 className="w-6 h-6 animate-spin text-white" />
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center justify-center h-full">
+                                <Loader2 className="h-6 w-6 animate-spin mb-2" />
+                                <span className="text-sm">Generating...</span>
                               </div>
                             )}
                           </div>
@@ -1326,7 +1411,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
                       <img
                         src={customAvatarImages[avatar.id] || avatar.image}
                         alt={avatar.label}
-                        className="object-cover w-full h-full"
+                        className="object-contain w-full h-full"
                       />
                       <div className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/50 to-transparent p-2">
                         <span className="text-white font-medium">
