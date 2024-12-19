@@ -242,9 +242,9 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
 
       // Call the try-on API
       const response = await fetch('http://127.0.0.1:5001/try-on-with-image', {
-        method: 'POST',
-        body: formData,
-      });
+          method: 'POST',
+          body: formData,
+        });
 
       if (!response.ok) {
         throw new Error(`Try-on request failed: ${response.status}`);
@@ -316,29 +316,46 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
 
   const handleVideoGeneration = async (selectedImages: string[], prompt: string) => {
     try {
-      const response = await fetch('http://127.0.0.1:5001/generate-video', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          images: selectedImages,
-          prompt: prompt
-        })
-      });
-
+      // Get the first selected image URL
+      const imageUrl = selectedImages[0];
+      if (!imageUrl) {
+        throw new Error('No image selected');
+      }
+  
+      // Convert image URL to binary
+      const imageResponse = await fetch(imageUrl);
+      const imageBlob = await imageResponse.blob();
+      
+      // Create form data
+      const formData = new FormData();
+      formData.append('image', imageBlob, 'image.jpg');
+      formData.append('prompt', prompt);
+  
+      let response
+      try {
+        response = await fetch('http://127.0.0.1:5001/generate-video-with-image', {
+          method: 'POST',
+          body: formData,
+        });
+      } catch (error) {
+        console.error('Error in video generation process:', error);
+        return;
+      }
+  
       if (!response.ok) {
         throw new Error(`Failed to generate video: ${response.status}`);
       }
-
+  
       const data = await response.json();
-      setVideoUrl(data.videoUrl); // Assuming the API returns a videoUrl field
+      setVideoUrl(data); // The response is directly the YouTube URL
+      setIsVideoModalOpen(false); // Close the modal after successful generation
       
     } catch (error) {
       console.error('Error generating video:', error);
       throw error;
     }
   }
+// ... rest of the code ...
 
   // Add state for mobile menu
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
@@ -479,7 +496,7 @@ const handleGenerateImage = async (e: React.MouseEvent<HTMLButtonElement>) => {
           shippingWeight:0.288,
           uniqueSellingPoint:"",
           uom:"PC",
-          url:"",
+          url:videoUrl,
           viewable:false,
           weight:0.134,
           width:12,
